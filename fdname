@@ -1,0 +1,206 @@
+#!/bin/bash
+
+# Metadata
+NAME="fdname"
+SHORT="converts a list of string arguments to proper file- or directory name"
+AUTHOR="GhostActive, https://github.com/ghostactive"
+COPYRIGHT="Copyright (C) 2021-2022 GhostActive"
+LICENSE="GNU General Public License v3.0"
+VERSION="1.0 (June 2022)"
+
+# Default date time format for timestamps
+TIMESTAMP_FORMAT="%F-%H%M%S"
+
+# Complement set of all characters to replace
+PATTERN="[:alnum:]"
+
+# Character used for replacing
+REPLACEMENT="-"
+
+# Used application to view full documentation
+PAGER_EXECUTABLE="less"
+
+# Command line arguments as list variable
+ARGS=( "$@" )
+
+# Position in command line parameters where string arguments starts
+INDEX=0
+
+# Documentation
+USAGE="
+$NAME - $SHORT
+
+Usage: $NAME [OPTION]... [DIRECTORY --] [STRING]...
+
+Options
+    -c      Checks if a file or directory with same name already exists. If
+            true, an incremental index will append to resolve name conflicts,
+            e.g. If 'file' exists then 'file-2' is returned.
+
+    -d      Prints the name as dot-file.
+
+    -e STRING
+            Appends STRING as extension to filename separated with '.' (dot),
+            e.g. -e txt.
+    
+    -h, --help
+            Prints a short description (-h) or opens the full documentation
+            using '$PAGER_EXECUTABLE' command (--help). --h prints the full
+            documentation without opening '$PAGER_EXECUTABLE'.
+
+    -t      Appends current timestamp to filename as suffix. By default the
+            date(1) format '$TIMESTAMP_FORMAT' is used.
+
+    Further options to modify the application's behaviour:
+
+    -f FORMAT
+            Uses the given date(1) FORMAT for printing timestamps. By default
+            '$TIMESTAMP_FORMAT' is used.
+
+    -l      Converts all characters in filename to lower case. Only stdin and
+            STRING arguments are modified - the DIRECTORY and file extension
+            (-e STRING) will not be affected by this parameter.
+
+    -r CHARACTER
+            Uses CHARACTER as replacement instead of '-' (dash).
+
+    -s      Switches the order of reading input. By default stdin is read first,
+            then STRING arguments from command line. Using -s reverse the order.
+
+Description
+    $NAME converts a list of strings containing special characters to a proper
+    filename. The input can be passed from stdin and as arguments. If both are
+    given, by default stdin is read first - then the STRING arguments from
+    command line. With option -s (switch) the order is reversed. 
+
+    All non alphanumeric characters are replaced by '-' (dash). Multiple dashes
+    in the filename are reduced to single one, e.g '--' or '---' gets to '-'.
+    Dashes at the begin and the end of a name are removed, too.
+
+    In addition to replacing special characters a DIRECTORY can defined as
+    prefix to build relative or absolute file paths. The DIRECTORY must be
+    passed as first STRING argument followed by the sequence '--' as delimiter.
+    All arguments after the delimiter are interpreted as part of the name.
+
+Hints
+    - (Double) Quotes are always deleted from input.
+
+    - If the delimiter is missing, the DIRECTORY path is handled as part of the
+      filename:
+
+    	\$ $NAME -t -e tar.gz backup/
+        backup-2022-06-05-180045-CEST.tar.gz
+              ^
+    	\$ $NAME -t -e tar.gz backup/ --
+        backup/2022-06-05-180123-CEST.tar.gz
+              ^
+Examples
+    \$ $NAME https://localhost:8443
+    https-localhost-8443
+
+    \$ $NAME \"//strange|string:/\"
+    strange-string
+
+    \$ $NAME -t -e txt hello world
+    hello-world-2022-06-05-172406-CEST.txt
+
+    \$ echo \"Hello\" | $NAME -l -e txt /tmp -- world
+    /tmp/hello-world.txt
+
+    $NAME is designed to be used in combination with redirection ('>', '>>')
+    and programs that have the ability to write output to files:
+
+    // Writes the output of wget command to https-localhost-8443.html
+    \$ URL=https://localhost:8443; wget -O \$(fdname -c \$URL).html \$URL
+    [...]
+
+Author
+    $AUTHOR
+
+Copyright
+    $COPYRIGHT
+
+License
+    $LICENSE
+
+Version
+    $VERSION
+"
+
+while getopts ":-:e:f:cdlhr:st" option; do
+    case $option in
+		c) CHECK_NAME_CONFLICTS="true"; (( INDEX++ ));;
+		d) AS_DOT_FILE="true"; (( INDEX++ ));;
+		e) EXTENSION="$OPTARG"; (( INDEX=INDEX + 2 ));;
+		f) TIMESTAMP_FORMAT="$OPTARG"; (( INDEX=INDEX +2 ));;
+        h) echo "$USAGE" | head -n 24; exit 0;;
+		l) TO_LOWER_CASE="true"; (( INDEX++ ));;
+		r) REPLACEMENT="$OPTARG"; (( INDEX= INDEX + 2 ));;
+		s) SWITCH_INPUT_ORDER="true"; (( INDEX++ ));;
+    	t) USE_TIMESTAMP="true"; (( INDEX++ ));;
+        -) 	case $OPTARG in
+        		h) echo "$USAGE"; exit 0;;
+        		help) echo "$USAGE" | $PAGER_EXECUTABLE; exit 0;;
+        	esac
+   esac
+done
+
+TIMESTAMP=$(date +"$TIMESTAMP_FORMAT")
+
+# Check if option [DIRECTORY --] is defined
+[[ ${ARGS[$INDEX+1]} == "--" ]] \
+	&& DIR_PATH="${ARGS[$INDEX]}" \
+	&& (( INDEX=INDEX +2 ))
+
+# Concatenate stdin, command line arguments and timestamp depending on its
+# correct order
+CONTENT_FROM_ARGS="${ARGS[@]:$INDEX}"
+CONTENT_FROM_STDIN="$(test ! -t 0 && cat -)"
+
+test -z $SWITCH_INPUT_ORDER \
+	&& CONTENT=( "$CONTENT_FROM_STDIN" "$CONTENT_FROM_ARGS" ) \
+	|| CONTENT=( "$CONTENT_FROM_ARGS" "$CONTENT_FROM_STDIN" )
+
+test ! -z $USE_TIMESTAMP && CONTENT+=( "$TIMESTAMP" )
+
+# Replace special characters and trim dashes
+RESULT=$(echo "${CONTENT[@]}" | tr -d "\"'" | tr -cs "$PATTERN" "$REPLACEMENT")
+
+# Remove REPLACEMENT (default '-') as prefix or suffix
+RESULT="${RESULT/#$REPLACEMENT}"
+RESULT="${RESULT/%$REPLACEMENT}"
+
+# Convert the name to lower case
+test ! -z $TO_LOWER_CASE && RESULT=${RESULT,,}
+
+# Print name as dot-file
+test ! -z $AS_DOT_FILE && RESULT=".$RESULT"
+
+# Append directory as prefix
+test ! -z $DIR_PATH && RESULT=$(echo "$DIR_PATH/$RESULT" | tr -s '/')
+
+# Check if file or directory with same name already exists
+if [[ ! -z $CHECK_NAME_CONFLICTS ]]; then
+	test -z $EXTENSION \
+		&& TEMP_RESULT="$RESULT" \
+		|| TEMP_RESULT="$RESULT.$EXTENSION"
+
+	[[ -f $TEMP_RESULT || -d $TEMP_RESULT ]] && FILE_VERSION=1
+
+	while [[ -f $TEMP_RESULT || -d $TEMP_RESULT ]]; do
+		(( FILE_VERSION++ ))
+
+		test -z $EXTENSION \
+			&& TEMP_RESULT="$RESULT$REPLACEMENT$FILE_VERSION" \
+			|| TEMP_RESULT="$RESULT$REPLACEMENT$FILE_VERSION.$EXTENSION"
+	done
+
+	RESULT="$RESULT$REPLACEMENT$FILE_VERSION"
+fi
+
+# Append extension as suffix
+test ! -z $EXTENSION && RESULT="$RESULT.$(echo $EXTENSION | tr -s '.')"
+
+echo $RESULT
+
+exit 0
