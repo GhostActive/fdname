@@ -6,7 +6,7 @@ strings to create proper file- or directory names.
 ## Installation
 
 1. Clone repository
-```bash
+```
 git clone https://github.com/GhostActive/fdname.git
 ```
 
@@ -17,7 +17,7 @@ cd fdname && chmod +x install.sh && ./install.sh
 
 ## Usage
 
-```bash
+```
 $ fdname --h
 
 fdname - converts a list of string arguments to proper file- or directory name
